@@ -1,128 +1,190 @@
 #include <WiFi.h>
-#include <WebServer.h>
 
-const char* ssid = "MyTruckNetwork";
-const char* password = "mytruckpassword";
+const char* ssid = "SSID NAME";
+const char* password = "PASSWORD";
 
-// Relay and switch pins
-const int ignitionPin = 2;
-const int lightsPin = 3;
+const int startButtonPin = 16;  // Pin for the start button
+const int accessoryRelayPin = 25;  // Pin for the accessory relay
+const int ignitionRelayPin = 33;  // Pin for the ignition relay
+const int redLedPin = 19;  // Pin for the red LED
+const int greenLedPin = 18;  // Pin for the green LED
+const int blueLedPin = 5;  // Pin for the blue LED
 
-WebServer server(80);
+// States for the truck's modes
+enum TruckMode {
+  OFF,
+  ACCESSORY,
+  IGNITION
+};
+
+TruckMode truckMode = OFF;
+
+// Debouncing variables
+int lastButtonState = HIGH;
+unsigned long lastDebounceTime = 0;
+unsigned long debounceDelay = 50;  // 50ms debounce delay
+
+// Timer variables
+unsigned long buttonHoldTime = 0;
+const unsigned long longPressThreshold = 1500;  // 1.5 seconds
+unsigned long ignitionTimer = 0;
+const unsigned long ignitionTimeout = 3000;  // 3 seconds
+bool longPressHandled = false;
+
+// Breathing variables
+unsigned long breathingTimer = 0;
+const unsigned long breathingPeriod = 2000;  // 2 seconds
+float breathingPhase = 0;
+
+// Flag to indicate if a phone is connected
+bool phoneConnected = false;
 
 void setup() {
   Serial.begin(115200);
+  pinMode(startButtonPin, INPUT_PULLUP);
+  pinMode(accessoryRelayPin, OUTPUT);
+  pinMode(ignitionRelayPin, OUTPUT);
+  pinMode(redLedPin, OUTPUT);
+  pinMode(greenLedPin, OUTPUT);
+  pinMode(blueLedPin, OUTPUT);
+
+  //delay(100);
+
+  digitalWrite(accessoryRelayPin, HIGH);
+  digitalWrite(ignitionRelayPin, HIGH);
+
+  // Set clock speed to 40 MHz
+  setCpuFrequencyMhz(40);
+
   WiFi.softAP(ssid, password);
-  Serial.println("SoftAP started");
-  server.on("/", handleRoot);
-  server.on("/ignition", handleIgnition);
-  server.on("/accMode", handleAccMode);
-  server.begin();
+  Serial.println("AP started");
+  Serial.println("IP address: ");
+  Serial.println(WiFi.softAPIP());
 }
 
 void loop() {
-  server.handleClient();
-}
+  // Check if a phone is connected
+  int numClients = WiFi.softAPgetStationNum();
+  phoneConnected = numClients > 0;
 
-void handleRoot() {
-  String html = "<html><body>";
-  html += "<h1>Truck Control</h1>";
-  html += "<h2>Ignition</h2>";
-  html += "<label class='switch'>";
-  html += "<input type='checkbox' id='ignitionToggle' onchange='updateIgnition(this.checked)'>";
-  html += "<span class='slider round'></span>";
-  html += "</label>";
-  html += "<span>&#x26A1;</span>";
-  html += "<h2>ACC Mode</h2>";
-  html += "<label class='switch'>";
-  html += "<input type='checkbox' id='accModeToggle' onchange='updateAccMode(this.checked)'>";
-  html += "<span class='slider round'></span>";
-  html += "</label>";
-  html += "<span>&#x26A1;</span>";
-  html += "<style>";
-  html += ".switch {";
-  html += "  position: relative;";
-  html += "  display: inline-block;";
-  html += "  width: 60px;";
-  html += "  height: 34px;";
-  html += "}";
-  html += ".switch input {";
-  html += "  opacity: 0;";
-  html += "  width: 0;";
-  html += "  height: 0;";
-  html += "}";
-  html += ".slider {";
-  html += "  position: absolute;";
-  html += "  cursor: pointer;";
-  html += "  top: 0;";
-  html += "  left: 0;";
-  html += "  right: 0;";
-  html += "  bottom: 0;";
-  html += "  background-color: #ccc;";
-  html += "  -webkit-transition: .4s;";
-  html += "  transition: .4s;";
-  html += "}";
-  html += ".slider:before {";
-  html += "  position: absolute;";
-  html += "  content: '';";
-  html += "  height: 26px;";
-  html += "  width: 26px;";
-  html += "  left: 4px;";
-  html += "  bottom: 4px;";
-  html += "  background-color: white;";
-  html += "  -webkit-transition: .4s;";
-  html += "  transition: .4s;";
-  html += "}";
-  html += "input:checked + .slider {";
-  html += "  background-color: #2196F3;";
-  html += "}";
-  html += "input:focus + .slider {";
-  html += "  box-shadow: 0 0 1px #2196F3;";
-  html += "}";
-  html += "input:checked + .slider:before {";
-  html += "  -webkit-transform: translateX(26px);";
-  html += "  -ms-transform: translateX(26px);";
-  html += "  transform: translateX(26px);";
-  html += "}";
-  html += ".slider.round {";
-  html += "  border-radius: 34px;";
-  html += "}";
-  html += ".slider.round:before {";
-  html += "  border-radius: 50%;";
-  html += "}";
-  html += "</style>";
-  html += "<script>";
-  html += "function updateIgnition(checked) {";
-  html += "  var xhr = new XMLHttpRequest();";
-  html += "  xhr.open('GET', '/ignition?state=' + (checked ? 'on' : 'off'), true);";
-  html += "  xhr.send();";
-  html += "}";
-  html += "function updateAccMode(checked) {";
-  html += "  var xhr = new XMLHttpRequest();";
-  html += "  xhr.open('GET', '/accMode?state=' + (checked ? 'on' : 'off'), true);";
-  html += "  xhr.send();";
-  html += "}";
-  html += "</script>";
-  html += "</body></html>";
-  server.send(200, "text/html", html);
-}
+  if (!phoneConnected) {
+    // Turn off LEDs
+    digitalWrite(redLedPin, LOW);
+    digitalWrite(greenLedPin, LOW);
+    digitalWrite(blueLedPin, LOW);
 
-void handleIgnition() {
-  String state = server.arg("state");
-  if (state == "on") {
-    digitalWrite(ignitionPin, HIGH);
   } else {
-    digitalWrite(ignitionPin, LOW);
-  }
-  server.send(200, "text/plain", "Ignition updated");
-}
+    // Read the start button state
+    int buttonState = digitalRead(startButtonPin);
 
-void handleAccMode() {
-  String state = server.arg("state");
-  if (state == "on") {
-    digitalWrite(lightsPin, HIGH);
-  } else {
-    digitalWrite(lightsPin, LOW);
+    // Check if the button state has changed
+    if (buttonState != lastButtonState) {
+      lastDebounceTime = millis();
+      longPressHandled = false;
+    }
+
+    // Check if the button has been pressed for long enough
+    if ((millis() - lastDebounceTime) > debounceDelay) {
+      if (buttonState == LOW) {
+        // Check if the button is being held for a long press
+        if (buttonHoldTime == 0) {
+          buttonHoldTime = millis();
+        }
+        if (millis() - buttonHoldTime > longPressThreshold && !longPressHandled) {
+          // Long press detected
+          if (truckMode == OFF) {
+            truckMode = ACCESSORY;
+            Serial.println("Mode changed to: ACCESSORY");
+          } else if (truckMode == ACCESSORY) {
+            truckMode = OFF;
+            Serial.println("Mode changed to: OFF");
+          }
+          longPressHandled = true;
+        }
+      } else {
+        // Button released, check if it was a short press
+        if (buttonHoldTime != 0 && millis() - buttonHoldTime < longPressThreshold) {
+          // Short press detected
+          if (truckMode == OFF) {
+            truckMode = IGNITION;
+            Serial.println("Mode changed to: IGNITION");
+            ignitionTimer = millis();
+          } else if (truckMode == ACCESSORY) {
+            truckMode = IGNITION;
+            Serial.println("Mode changed to: IGNITION");
+            ignitionTimer = millis();
+          } else if (truckMode == IGNITION) {
+            truckMode = OFF;
+            Serial.println("Mode changed to: OFF");
+          }
+        }
+        buttonHoldTime = 0;
+      }
+    }
+
+    // Update the last button state
+    lastButtonState = buttonState;
+
+    // Update the breathing phase
+    breathingPhase = (millis() - breathingTimer) / (float)breathingPeriod * 2 * PI;
+    if (breathingPhase > 2 * PI) {
+      breathingPhase -= 2 * PI;
+      breathingTimer = millis();
+    }
+
+    // Control the relays and RGB LED based on the truck mode
+    switch (truckMode) {
+      case OFF:
+        digitalWrite(accessoryRelayPin, HIGH);
+        digitalWrite(ignitionRelayPin, HIGH);
+        analogWrite(redLedPin, (int)(128 + 127 * sin(breathingPhase)));
+        analogWrite(greenLedPin, 0);
+        analogWrite(blueLedPin, 0);
+        break;
+      case ACCESSORY:
+        digitalWrite(accessoryRelayPin, LOW);
+        digitalWrite(ignitionRelayPin, HIGH);
+        analogWrite(redLedPin, 0);
+        analogWrite(greenLedPin, 0);
+        analogWrite(blueLedPin, (int)(128 + 127 * sin(breathingPhase)));
+        break;
+      case IGNITION:
+        digitalWrite(accessoryRelayPin, LOW);
+        if (millis() - ignitionTimer < ignitionTimeout) {
+          digitalWrite(ignitionRelayPin, LOW);
+        } else {
+          digitalWrite(ignitionRelayPin, HIGH);
+        }
+        analogWrite(redLedPin, 0);
+        analogWrite(greenLedPin, (int)(128 + 127 * sin(breathingPhase)));
+        analogWrite(blueLedPin, 0);
+        break;
+    }
+
+    // Print the current mode
+    static unsigned long lastPrintTime = 0;
+    if (millis() - lastPrintTime > 1000) {
+      lastPrintTime = millis();
+      Serial.print("Current mode: ");
+      switch (truckMode) {
+        case OFF:
+          Serial.println("OFF");
+          break;
+        case ACCESSORY:
+          Serial.println("ACCESSORY");
+          break;
+        case IGNITION:
+          Serial.println("IGNITION");
+          break;
+      }
+    }
+
+    // Print the phone connection status
+    static unsigned long lastPhonePrintTime = 0;
+    if (millis() - lastPhonePrintTime > 1000) {
+      lastPhonePrintTime = millis();
+      Serial.print("Phone connected: ");
+      Serial.println(phoneConnected);
+    }
   }
-  server.send(200, "text/plain", "ACC Mode updated");
 }
