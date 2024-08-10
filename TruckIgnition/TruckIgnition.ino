@@ -1,8 +1,8 @@
 #include <WiFi.h>
 #include <esp_task_wdt.h>
 
-const char* ssid = "SSID NAME";
-const char* password = "PASSWORD";
+const char* ssid = "Truck Ignition";
+const char* password = "Schmidusa1";
 
 const int startButtonPin = 16;  // Pin for the start button
 const int accessoryRelayPin = 25;  // Pin for the accessory relay
