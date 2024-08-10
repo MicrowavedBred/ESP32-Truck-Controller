@@ -1,4 +1,5 @@
 #include <WiFi.h>
+#include <esp_task_wdt.h>
 
 const char* ssid = "SSID NAME";
 const char* password = "PASSWORD";
@@ -48,13 +49,11 @@ void setup() {
   pinMode(greenLedPin, OUTPUT);
   pinMode(blueLedPin, OUTPUT);
 
-  //delay(100);
-
   digitalWrite(accessoryRelayPin, HIGH);
   digitalWrite(ignitionRelayPin, HIGH);
 
   // Set clock speed to 40 MHz
-  setCpuFrequencyMhz(40);
+  setCpuFrequencyMhz(80);
 
   WiFi.softAP(ssid, password);
   Serial.println("AP started");
@@ -67,11 +66,12 @@ void loop() {
   int numClients = WiFi.softAPgetStationNum();
   phoneConnected = numClients > 0;
 
-  if (!phoneConnected) {
+ if (!phoneConnected && truckMode == OFF) {
     // Turn off LEDs
-    digitalWrite(redLedPin, LOW);
-    digitalWrite(greenLedPin, LOW);
-    digitalWrite(blueLedPin, LOW);
+    analogWrite(redLedPin, 0);
+    analogWrite(greenLedPin, 0);
+    analogWrite(blueLedPin, 0);
+    delay(1000);
 
   } else {
     // Read the start button state
@@ -185,6 +185,12 @@ void loop() {
       lastPhonePrintTime = millis();
       Serial.print("Phone connected: ");
       Serial.println(phoneConnected);
+
+        Serial.println();
+  Serial.print("CPU Frequency is: ");
+  Serial.print(getCpuFrequencyMhz()); //Get CPU clock
+  Serial.print(" Mhz");
+  Serial.println();
     }
   }
 }
